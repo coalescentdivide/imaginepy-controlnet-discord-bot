@@ -11,6 +11,10 @@ from discord.ext import commands
 from dotenv import load_dotenv
 from imaginepy import AsyncImagine, Control, Style
 
+load_dotenv()
+bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
+task_queue = asyncio.Queue()
+queue_counter = 0
 
 def parse_arguments(command_args: str):
     args = command_args.split()
@@ -18,7 +22,7 @@ def parse_arguments(command_args: str):
         'prompt': '',
         'negative': 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry',
         'scale': 7.5,
-        'control': Control.DEPTH,
+        'control': Control.CANNY,
         'style': Style.IMAGINE_V1,
         'seed': str(random.randint(1, 9999999999)),
     }
@@ -40,12 +44,22 @@ def parse_arguments(command_args: str):
                     parsed_args[current_key] += ' ' + arg
     return parsed_args
 
-load_dotenv()
-bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
+async def worker():
+    global queue_counter
+    while True:
+        func, ctx, command_args = await task_queue.get()
+        try:
+            await func(ctx, command_args)
+        except Exception as e:
+            print(f"{Fore.RED}{s.BRIGHT}Error processing task: {e}{s.RESET_ALL}")
+        finally:
+            task_queue.task_done()
+            queue_counter -= 1
 
 @bot.event
 async def on_ready():
-    print(f'{bot.user} has connected to Discord!')
+    print(f"{Fore.CYAN}{bot.user} has connected to Discord!{s.RESET_ALL}")
+    bot.loop.create_task(worker())
 
 @bot.command()
 async def controls(ctx):
@@ -59,7 +73,14 @@ async def styles(ctx):
 
 @bot.command()
 async def remix(ctx, *, command_args: str):
-    print(f"{ctx.author.name} remixing an image")
+    global queue_counter
+    await task_queue.put((queue_remix, ctx, command_args))
+    queue_counter += 1
+    print(f"{Fore.BLUE}{s.BRIGHT}Queue size: {queue_counter}{s.RESET_ALL}")
+
+@bot.command()
+async def queue_remix(ctx, command_args: str):
+    print(f"User {Fore.RED}{s.BRIGHT}{ctx.author.name}{s.RESET_ALL} remixing an image")
     image = None
     if ctx.message.reference and ctx.message.reference.resolved:
         replied_message = ctx.message.reference.resolved
@@ -89,7 +110,7 @@ async def remix(ctx, *, command_args: str):
                 embed.set_image(url=f"attachment://{file.filename}")
                 embed.set_footer(text=prompt)
                 await ctx.send(embed=embed, file=file)
-                print(f"{Fore.GREEN}Successfully processed image!{s.RESET_ALL}\n"
+                print(f"{Fore.GREEN}Successfully processed image with the following settings:{s.RESET_ALL}\n"
                     f"{Fore.YELLOW}Prompt:{s.RESET_ALL} {Back.WHITE}{Fore.BLACK}{combined_prompt}{s.RESET_ALL}\n"
                     f"{Fore.YELLOW}Negative:{s.RESET_ALL} {Back.WHITE}{Fore.RED}{args['negative']}{s.RESET_ALL}\n"
                     f"{Fore.YELLOW}Seed:{s.RESET_ALL} {args['seed']}\n"
@@ -97,17 +118,17 @@ async def remix(ctx, *, command_args: str):
                     f"{Fore.YELLOW}Style:{s.RESET_ALL} {args['style'].name}")
                 break
             except aiohttp.ClientResponseError as e:
-                print(f"Error {e.status}: {e.message}. Retry attempt {retries}. Retrying in {wait_time} seconds...")
+                print(f"{Fore.RED}{s.DIM}Error {e.status}: {e.message}. Retry attempt {retries}. Retrying in {wait_time} seconds...{s.RESET_ALL}")
                 if retries < 3:
                     await asyncio.sleep(wait_time)
                     retries += 1
             except asyncio.TimeoutError:
-                print(f"Timeout Error: Retry attempt {retries}. Retrying in {wait_time} seconds...")
+                print(f"{Fore.RED}{s.DIM}Timeout Error: Retry attempt {retries}. Retrying in {wait_time} seconds...{s.RESET_ALL}")
                 if retries < 3:
                     await asyncio.sleep(wait_time)
                     retries += 1
                 else:
-                    await ctx.send(f"Error: {e.status} {e.message}. Try again later")
+                    await ctx.send(f"Error: Timeout. Try again later")
                     break
     except Exception as e:
         print(type(e), e)
@@ -115,5 +136,4 @@ async def remix(ctx, *, command_args: str):
         if imagine:
             await imagine.close()
 
-if __name__ == "__main__":
-    bot.run(os.getenv("DISCORD_TOKEN"))
+bot.run(os.getenv("DISCORD_TOKEN"))
