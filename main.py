@@ -22,7 +22,7 @@ def parse_arguments(command_args: str):
         'prompt': '',
         'negative': 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry',
         'scale': 7.5,
-        'control': Control.CANNY,
+        'control': Control.DEPTH,
         'style': Style.IMAGINE_V1,
         'seed': str(random.randint(1, 9999999999)),
     }
@@ -115,9 +115,9 @@ async def queue_remix(ctx, command_args: str):
         retries = 1
         backoff_factor = 2
         wait_time = retries * backoff_factor
-        while retries <= 3:
+        while retries <= 5:
             try:
-                remixed_image = await asyncio.wait_for(imagine.controlnet(image=image, prompt=args['prompt'], control=args['control'], negative=args['negative'], cfg=args['scale'], style=args['style'], seed=args['seed']), timeout=10)
+                remixed_image = await asyncio.wait_for(imagine.controlnet(image=image, prompt=args['prompt'], control=args['control'], negative=args['negative'], cfg=args['scale'], style=args['style'], seed=args['seed']), timeout=15)
                 info = f"⚙️{args['control'].name} ⚖️{args['scale']} 🎨{args['style'].name} 🌱{args['seed']}"
                 combined_prompt = f"{args['prompt']} {args['style'].value[3]}" if {args['style'].value[3]} is None else args['prompt']
                 prompt = f"Prompt:\n{combined_prompt}\n\nNegative Prompt:\n{args['negative'] or 'None'}"
@@ -135,18 +135,19 @@ async def queue_remix(ctx, command_args: str):
                     f"{Fore.YELLOW}Style:{s.RESET_ALL} {args['style'].name}")
                 break
             except aiohttp.ClientResponseError as e:
-                print(f"{Fore.RED}{s.DIM}Error {e.status}: {e.message}. Retry attempt {retries}. Retrying in {wait_time} seconds...{s.RESET_ALL}")
-                if retries < 3:
-                    await asyncio.sleep(wait_time)
-                    retries += 1
+                print(f"{Fore.RED}{s.DIM}Client Response Error {e.status}: {e.message}. Retry attempt {retries}. Retrying in {wait_time} seconds...{s.RESET_ALL}")
+                retries += 1
             except asyncio.TimeoutError:
                 print(f"{Fore.RED}{s.DIM}Timeout Error: Retry attempt {retries}. Retrying in {wait_time} seconds...{s.RESET_ALL}")
-                if retries < 3:
-                    await asyncio.sleep(wait_time)
-                    retries += 1
-                else:
-                    await ctx.send(f"Error: Timeout. Try again later")
-                    break
+                retries += 1
+            except ConnectionError as e:
+                print(f"{Fore.RED}{s.DIM}Connection Error: Retry attempt {retries}. Retrying in {wait_time} seconds...{s.RESET_ALL}")
+                retries += 1
+            if retries <= 3:
+                await asyncio.sleep(wait_time)
+                wait_time = retries * backoff_factor
+        if retries > 3:
+            await ctx.send(f"Error: Timeout. Try again later")
     except Exception as e:
         print(type(e), e)
     finally:
