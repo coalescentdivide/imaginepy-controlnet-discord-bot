@@ -36,13 +36,21 @@ def parse_arguments(command_args: str):
             elif current_key == 'control':
                 parsed_args[current_key] = Control[arg.upper()]
             elif current_key == 'style':
-                parsed_args[current_key] = Style[arg.upper()]
+                style_str = arg.upper()
+                if style_str == "RANDOM":
+                    random_style = random.choice(list(Style))
+                    while random_style == Style.RANDOM:
+                        random_style = random.choice(list(Style))
+                    parsed_args[current_key] = random_style
+                else:
+                    parsed_args[current_key] = Style[style_str]
             else:
                 if parsed_args[current_key] is None:
                     parsed_args[current_key] = arg
                 else:
                     parsed_args[current_key] += ' ' + arg
     return parsed_args
+
 
 async def worker():
     global queue_counter
@@ -62,21 +70,30 @@ async def on_ready():
     bot.loop.create_task(worker())
 
 @bot.command()
-async def controls(ctx):
-    controls = "\n".join(f"{control.name}" for control in Control)
-    await ctx.send(f"Available control values:\n```\n{controls}\n```")
-
-@bot.command()
 async def styles(ctx):
     styles = "\n".join(f"{style.name}" for style in Style)
     await ctx.send(f"Available styles:\n```\n{styles}\n```")
 
 @bot.command()
-async def remix(ctx, *, command_args: str):
+async def remix(ctx, *, command_args: str = None):
     global queue_counter
-    await task_queue.put((queue_remix, ctx, command_args))
-    queue_counter += 1
-    print(f"{Fore.BLUE}{s.BRIGHT}Queue size: {queue_counter}{s.RESET_ALL}")
+    if command_args is None:
+        example_control = random.choice(list(Control)).name.lower()
+        example_style = random.choice(list(Style)).name.lower()
+
+        embed = Embed(title="Use with an image attachment or reply to an image", description="!remix [prompt] [optional arguments]")
+        embed.add_field(name="🎨 See the full style list", value="`!styles`", inline=False)
+        embed.add_field(name="⚙️ Choose the control model (depth, canny, scribble, pose)", value="`--control depth`", inline=False)
+        embed.add_field(name="❌ Choose a negative prompt (optional)", value="--negative promptgoeshere", inline=False)
+        embed.add_field(name="⚖️ Change the guidance scale (0-16)", value="--scale 8", inline=False)
+        embed.add_field(name="🖌️ Use a style or choose random", value="`--style random`", inline=False)        
+        embed.add_field(name="Example", value=f"`!remix cat --control {example_control} --negative dog --style {example_style} --scale 8 --seed 12345`", inline=False)
+
+        await ctx.send(embed=embed)
+    else:
+        await task_queue.put((queue_remix, ctx, command_args))
+        queue_counter += 1
+        print(f"{Fore.BLUE}{s.BRIGHT}Queue size: {queue_counter}{s.RESET_ALL}")
 
 @bot.command()
 async def queue_remix(ctx, command_args: str):
