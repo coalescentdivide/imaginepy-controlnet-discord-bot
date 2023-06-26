@@ -115,11 +115,11 @@ async def queue_remix(ctx, command_args: str):
         retries = 1
         backoff_factor = 2
         wait_time = retries * backoff_factor
-        while retries <= 5:
+        while retries <= 6:
             try:
                 remixed_image = await asyncio.wait_for(imagine.controlnet(image=image, prompt=args['prompt'], control=args['control'], negative=args['negative'], cfg=args['scale'], style=args['style'], seed=args['seed']), timeout=15)
                 info = f"⚙️{args['control'].name} ⚖️{args['scale']} 🎨{args['style'].name} 🌱{args['seed']}"
-                combined_prompt = f"{args['prompt']} {args['style'].value[3]}" if {args['style'].value[3]} is None else args['prompt']
+                combined_prompt = f"{args['prompt']} {args['style'].value[3]}" if args['style'].value[3] is not None else args['prompt']
                 prompt = f"Prompt:\n{combined_prompt}\n\nNegative Prompt:\n{args['negative'] or 'None'}"
                 file = File(fp=io.BytesIO(remixed_image), filename="remixed_image.png")
                 embed = Embed()
@@ -143,10 +143,10 @@ async def queue_remix(ctx, command_args: str):
             except ConnectionError as e:
                 print(f"{Fore.RED}{s.DIM}Connection Error: Retry attempt {retries}. Retrying in {wait_time} seconds...{s.RESET_ALL}")
                 retries += 1
-            if retries <= 3:
+            if retries <= 6:
                 await asyncio.sleep(wait_time)
                 wait_time = retries * backoff_factor
-        if retries > 3:
+        if retries > 6:
             await ctx.send(f"Error: Timeout. Try again later")
     except Exception as e:
         print(type(e), e)
