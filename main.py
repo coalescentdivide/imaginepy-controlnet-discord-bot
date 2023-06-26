@@ -2,17 +2,17 @@ import asyncio
 import io
 import os
 import random
-
-import aiohttp
+import httpx
 from colorama import Fore, Back, Style as s
 import discord
 from discord import Embed, File
 from discord.ext import commands
 from dotenv import load_dotenv
-from imaginepy import AsyncImagine, Control, Style
+from imaginepy import AsyncImagine, Mode, Style
 
 load_dotenv()
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
+bot.remove_command('help')
 task_queue = asyncio.Queue()
 queue_counter = 0
 
@@ -20,11 +20,11 @@ def parse_arguments(command_args: str):
     args = command_args.split()
     parsed_args = {
         'prompt': '',
-        'negative': 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry',
+        'negative': None,
         'scale': 7.5,
-        'control': Control.DEPTH,
-        'style': Style.IMAGINE_V1,
-        'seed': str(random.randint(1, 9999999999)),
+        'control': Mode.DEPTH,
+        'style': Style.NO_STYLE,
+        'seed': str(random.randint(1, 9999999999))
     }
     current_key = 'prompt'
     for arg in args:
@@ -34,7 +34,7 @@ def parse_arguments(command_args: str):
             if current_key == 'scale':
                 parsed_args[current_key] = float(arg)
             elif current_key == 'control':
-                parsed_args[current_key] = Control[arg.upper()]
+                parsed_args[current_key] = Mode[arg.upper()]
             elif current_key == 'style':
                 style_str = arg.upper()
                 if style_str == "RANDOM":
@@ -44,11 +44,18 @@ def parse_arguments(command_args: str):
                     parsed_args[current_key] = random_style
                 else:
                     parsed_args[current_key] = Style[style_str]
+            elif current_key == 'seed':
+                try:
+                    parsed_args[current_key] = int(arg)
+                except ValueError:
+                    raise ValueError(f"Invalid seed value: {arg}")
             else:
                 if parsed_args[current_key] is None:
                     parsed_args[current_key] = arg
                 else:
                     parsed_args[current_key] += ' ' + arg
+    if parsed_args['negative'] is None:
+        parsed_args['negative'] = 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry'
     return parsed_args
 
 
@@ -78,24 +85,21 @@ async def styles(ctx):
 async def remix(ctx, *, command_args: str = None):
     global queue_counter
     if command_args is None:
-        example_control = random.choice(list(Control)).name.lower()
+        example_control = random.choice(list(Mode)).name.lower()
         example_style = random.choice(list(Style)).name.lower()
-
         embed = Embed(title="Use with an image attachment or reply to an image", description="!remix [prompt] [optional arguments]")
         embed.add_field(name="🎨 See the full style list", value="`!styles`", inline=False)
-        embed.add_field(name="⚙️ Choose the control model (depth, canny, scribble, pose)", value="`--control depth`", inline=False)
+        embed.add_field(name="⚙️ Choose the control model (depth, canny, scribble, pose, line_art)", value="`--control depth`", inline=False)
         embed.add_field(name="❌ Choose a negative prompt (optional)", value="--negative promptgoeshere", inline=False)
         embed.add_field(name="⚖️ Change the guidance scale (0-16)", value="--scale 8", inline=False)
         embed.add_field(name="🖌️ Use a style or choose random", value="`--style random`", inline=False)        
         embed.add_field(name="Example", value=f"`!remix cat --control {example_control} --negative dog --style {example_style} --scale 8 --seed 12345`", inline=False)
-
         await ctx.send(embed=embed)
     else:
         await task_queue.put((queue_remix, ctx, command_args))
         queue_counter += 1
         print(f"{Fore.BLUE}{s.BRIGHT}Queue size: {queue_counter}{s.RESET_ALL}")
 
-@bot.command()
 async def queue_remix(ctx, command_args: str):
     print(f"User {Fore.RED}{s.BRIGHT}{ctx.author.name}{s.RESET_ALL} remixing an image")
     image = None
@@ -110,14 +114,19 @@ async def queue_remix(ctx, command_args: str):
     else:
         await ctx.send("Error: No image found in the message or the replied message. Please attach an image to your message or reply to a message with an image.")
         return
-    try:
-        args = parse_arguments(command_args)
-        retries = 1
-        backoff_factor = 2
-        wait_time = retries * backoff_factor
-        while retries <= 6:
+
+    MAX_CONNECTION_RETRIES = 3
+    MAX_SESSION_RETRIES = 2
+    BACKOFF_FACTOR = 2
+    session_retries = 0
+
+    while session_retries < MAX_SESSION_RETRIES:
+        connection_retries = 0
+        success = False
+        while connection_retries < MAX_CONNECTION_RETRIES:
             try:
-                remixed_image = await asyncio.wait_for(imagine.controlnet(image=image, prompt=args['prompt'], control=args['control'], negative=args['negative'], cfg=args['scale'], style=args['style'], seed=args['seed']), timeout=15)
+                args = parse_arguments(command_args)
+                remixed_image = await asyncio.wait_for(imagine.controlnet(content=image, prompt=args['prompt'], mode=args['control'], negative=args['negative'], cfg=args['scale'], style=args['style'], seed=args['seed']), timeout=15)
                 info = f"⚙️{args['control'].name} ⚖️{args['scale']} 🎨{args['style'].name} 🌱{args['seed']}"
                 combined_prompt = f"{args['prompt']} {args['style'].value[3]}" if args['style'].value[3] is not None else args['prompt']
                 prompt = f"Prompt:\n{combined_prompt}\n\nNegative Prompt:\n{args['negative'] or 'None'}"
@@ -128,30 +137,35 @@ async def queue_remix(ctx, command_args: str):
                 embed.set_footer(text=prompt)
                 await ctx.send(embed=embed, file=file)
                 print(f"{Fore.GREEN}Successfully processed image with the following settings:{s.RESET_ALL}\n"
-                    f"{Fore.YELLOW}Prompt:{s.RESET_ALL} {Back.WHITE}{Fore.BLACK}{combined_prompt}{s.RESET_ALL}\n"
-                    f"{Fore.YELLOW}Negative:{s.RESET_ALL} {Back.WHITE}{Fore.RED}{args['negative']}{s.RESET_ALL}\n"
-                    f"{Fore.YELLOW}Seed:{s.RESET_ALL} {args['seed']}\n"
-                    f"{Fore.YELLOW}Control:{s.RESET_ALL} {args['control'].name}\n"
-                    f"{Fore.YELLOW}Style:{s.RESET_ALL} {args['style'].name}")
+                      f"{Fore.YELLOW}Prompt:{s.RESET_ALL} {Back.WHITE}{Fore.BLACK}{combined_prompt}{s.RESET_ALL}\n"
+                      f"{Fore.YELLOW}Negative:{s.RESET_ALL} {Back.WHITE}{Fore.RED}{args['negative']}{s.RESET_ALL}\n"
+                      f"{Fore.YELLOW}Seed:{s.RESET_ALL} {args['seed']}\n"
+                      f"{Fore.YELLOW}Control:{s.RESET_ALL} {args['control'].name}\n"
+                      f"{Fore.YELLOW}Style:{s.RESET_ALL} {args['style'].name}")
+                success = True
                 break
-            except aiohttp.ClientResponseError as e:
-                print(f"{Fore.RED}{s.DIM}Client Response Error {e.status}: {e.message}. Retry attempt {retries}. Retrying in {wait_time} seconds...{s.RESET_ALL}")
-                retries += 1
+            except httpx.HTTPStatusError as e:
+                print(f"{Fore.RED}{s.DIM}Client Response Error {e.response.status_code}: {e.response.text}. Retrying...{s.RESET_ALL}")
             except asyncio.TimeoutError:
-                print(f"{Fore.RED}{s.DIM}Timeout Error: Retry attempt {retries}. Retrying in {wait_time} seconds...{s.RESET_ALL}")
-                retries += 1
-            except ConnectionError as e:
-                print(f"{Fore.RED}{s.DIM}Connection Error: Retry attempt {retries}. Retrying in {wait_time} seconds...{s.RESET_ALL}")
-                retries += 1
-            if retries <= 6:
-                await asyncio.sleep(wait_time)
-                wait_time = retries * backoff_factor
-        if retries > 6:
-            await ctx.send(f"Error: Timeout. Try again later")
-    except Exception as e:
-        print(type(e), e)
-    finally:
-        if imagine:
-            await imagine.close()
+                print(f"{Fore.RED}{s.DIM}Timeout Error: Retrying...{s.RESET_ALL}")
+            except Exception as e:
+                print(type(e), e)
+            connection_retries += 1
+            if connection_retries < MAX_CONNECTION_RETRIES:
+                await asyncio.sleep(BACKOFF_FACTOR ** connection_retries)
+        if success:
+            break
+
+        session_retries += 1
+        if session_retries < MAX_SESSION_RETRIES:
+            if imagine:
+                await imagine.close()
+                await asyncio.sleep(BACKOFF_FACTOR ** session_retries)
+                imagine = AsyncImagine()
+
+    if not success:
+        await ctx.send("Please try again later.")
+    if imagine:
+        await imagine.close()
 
 bot.run(os.getenv("DISCORD_TOKEN"))
