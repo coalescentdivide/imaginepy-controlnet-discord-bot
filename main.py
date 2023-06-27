@@ -2,12 +2,15 @@ import asyncio
 import io
 import os
 import random
-import httpx
-from colorama import Fore, Back, Style as s
+
 import discord
-from discord import Embed, File
+import httpx
+from colorama import Back, Fore
+from colorama import Style as s
+from discord import Activity, ActivityType, Embed, File
 from discord.ext import commands
 from dotenv import load_dotenv
+
 from imaginepy import AsyncImagine, Mode, Style
 
 load_dotenv()
@@ -16,13 +19,14 @@ bot.remove_command('help')
 task_queue = asyncio.Queue()
 queue_counter = 0
 
+
 def parse_arguments(command_args: str):
     args = command_args.split()
     parsed_args = {
         'prompt': '',
         'negative': None,
         'scale': 7.5,
-        'control': Mode.DEPTH,
+        'control': Mode.CANNY,
         'style': Style.NO_STYLE,
         'seed': str(random.randint(1, 9999999999))
     }
@@ -59,7 +63,7 @@ def parse_arguments(command_args: str):
     return parsed_args
 
 
-async def worker():
+async def queue():
     global queue_counter
     while True:
         func, ctx, command_args = await task_queue.get()
@@ -71,10 +75,12 @@ async def worker():
             task_queue.task_done()
             queue_counter -= 1
 
+
 @bot.event
 async def on_ready():
     print(f"{Fore.CYAN}{bot.user} has connected to Discord!{s.RESET_ALL}")
-    bot.loop.create_task(worker())
+    await bot.change_presence(activity=Activity(type=ActivityType.watching, name="for !remix + image"))
+    bot.loop.create_task(queue())
 
 @bot.command()
 async def styles(ctx):
@@ -82,18 +88,24 @@ async def styles(ctx):
     await ctx.send(f"Available styles:\n```\n{styles}\n```")
 
 @bot.command()
-async def remix(ctx, *, command_args: str = None):
+async def remix(ctx, *, command_args: str = ""):
     global queue_counter
-    if command_args is None:
+    image = None
+    if ctx.message.attachments:
+        image = ctx.message.attachments[0]
+    elif ctx.message.reference and ctx.message.reference.resolved.attachments:
+        image = ctx.message.reference.resolved.attachments[0] 
+    if not image:
         example_control = random.choice(list(Mode)).name.lower()
         example_style = random.choice(list(Style)).name.lower()
-        embed = Embed(title="Use with an image attachment or reply to an image", description="!remix [prompt] [optional arguments]")
-        embed.add_field(name="🎨 See the full style list", value="`!styles`", inline=False)
-        embed.add_field(name="⚙️ Choose the control model (depth, canny, scribble, pose, line_art)", value="`--control depth`", inline=False)
-        embed.add_field(name="❌ Choose a negative prompt (optional)", value="--negative promptgoeshere", inline=False)
-        embed.add_field(name="⚖️ Change the guidance scale (0-16)", value="--scale 8", inline=False)
-        embed.add_field(name="🖌️ Use a style or choose random", value="`--style random`", inline=False)        
-        embed.add_field(name="Example", value=f"`!remix cat --control {example_control} --negative dog --style {example_style} --scale 8 --seed 12345`", inline=False)
+        embed = Embed(title="Use with an image attachment or reply to an image", description="!remix [optional prompt] [optional arguments]")        
+        embed.add_field(name="🖌️ Use a style or choose random", value="`--style random`\n*to see all available styles use the `!styles` command as a seperate message*\n\u200b", inline=False) 
+        embed.add_field(name="⚙️ Choose the control model:", value="`--control`\n`depth` works best for actual photos\n`canny` works best for 2d images\n`line_art` works best for 2d drawings\n`scribble` changes the image alot\n`pose` only uses the pose of a character)\n\u200b", inline=False)
+        embed.add_field(name="❌ Choose a negative prompt (optional)", value="`--negative ugly`\n\u200b", inline=False)
+        embed.add_field(name="⚖️ Change the guidance scale (0-16)", value="`--scale 8`\n\u200b", inline=False)
+        embed.add_field(name="Example", value=f"`!remix cat --control {example_control} --negative dog --style {example_style} --scale 8 --seed 12345`\n\u200b", inline=False)
+        embed.add_field(name="", value=f"🔗[Github link](https://github.com/coalescentdivide/imaginepy-controlnet-discord-bot/tree/main)", inline=False)
+        embed.set_footer(text="Made by Trypsky")
         await ctx.send(embed=embed)
     else:
         await task_queue.put((queue_remix, ctx, command_args))
@@ -109,11 +121,7 @@ async def queue_remix(ctx, command_args: str):
             image = await replied_message.attachments[0].read()
     elif len(ctx.message.attachments) > 0:
         image = await ctx.message.attachments[0].read()
-    if image:
-        imagine = AsyncImagine()
-    else:
-        await ctx.send("Error: No image found in the message or the replied message. Please attach an image to your message or reply to a message with an image.")
-        return
+    imagine = AsyncImagine()
 
     MAX_CONNECTION_RETRIES = 3
     MAX_SESSION_RETRIES = 2
@@ -123,25 +131,35 @@ async def queue_remix(ctx, command_args: str):
     while session_retries < MAX_SESSION_RETRIES:
         connection_retries = 0
         success = False
+
         while connection_retries < MAX_CONNECTION_RETRIES:
             try:
                 args = parse_arguments(command_args)
+                if not args['prompt'] and image:
+                    try:
+                        print(f"{Fore.WHITE}{Back.MAGENTA}No prompt found. Interrogating Image...{s.RESET_ALL}")
+                        generated_prompt = await asyncio.wait_for(imagine.interrogator(content=image), timeout=10)
+                        args['prompt'] = generated_prompt
+                    except asyncio.TimeoutError:
+                        args['prompt'] = "amazing"
                 remixed_image = await asyncio.wait_for(imagine.controlnet(content=image, prompt=args['prompt'], mode=args['control'], negative=args['negative'], cfg=args['scale'], style=args['style'], seed=args['seed']), timeout=15)
-                info = f"⚙️{args['control'].name} ⚖️{args['scale']} 🎨{args['style'].name} 🌱{args['seed']}"
-                combined_prompt = f"{args['prompt']} {args['style'].value[3]}" if args['style'].value[3] is not None else args['prompt']
-                prompt = f"Prompt:\n{combined_prompt}\n\nNegative Prompt:\n{args['negative'] or 'None'}"
-                file = File(fp=io.BytesIO(remixed_image), filename="remixed_image.png")
-                embed = Embed()
-                embed.set_author(name=info)
-                embed.set_image(url=f"attachment://{file.filename}")
-                embed.set_footer(text=prompt)
-                await ctx.send(embed=embed, file=file)
+                info = f"🧠{ctx.author.mention}⚙️`{args['control'].name.lower()}`⚖️`{args['scale']}`🎨`{args['style'].name.lower()}`🌱`{args['seed']}`"
+                combined_prompt = f"{args['prompt']} {args['style'].value[3]}" if args['style'].value[3] is not None else args['prompt']                
+                default_negative = 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry'
+                if args['negative'] != default_negative:
+                    prompt = f"{combined_prompt}\n\nNegative Prompt:\n{args['negative']}"
+                else:
+                    prompt = f"\n{combined_prompt}"
                 print(f"{Fore.GREEN}Successfully processed image with the following settings:{s.RESET_ALL}\n"
                       f"{Fore.YELLOW}Prompt:{s.RESET_ALL} {Back.WHITE}{Fore.BLACK}{combined_prompt}{s.RESET_ALL}\n"
                       f"{Fore.YELLOW}Negative:{s.RESET_ALL} {Back.WHITE}{Fore.RED}{args['negative']}{s.RESET_ALL}\n"
                       f"{Fore.YELLOW}Seed:{s.RESET_ALL} {args['seed']}\n"
                       f"{Fore.YELLOW}Control:{s.RESET_ALL} {args['control'].name}\n"
-                      f"{Fore.YELLOW}Style:{s.RESET_ALL} {args['style'].name}")
+                      f"{Fore.YELLOW}Style:{s.RESET_ALL} {args['style'].name}")                
+                file = File(fp=io.BytesIO(remixed_image), filename="remixed_image.png")
+                embed = Embed()
+                embed.set_footer(text=prompt)
+                await ctx.send(content=f"{info}\n\n", file=file, embed=embed)
                 success = True
                 break
             except httpx.HTTPStatusError as e:
@@ -150,6 +168,7 @@ async def queue_remix(ctx, command_args: str):
                 print(f"{Fore.RED}{s.DIM}Timeout Error: Retrying...{s.RESET_ALL}")
             except Exception as e:
                 print(type(e), e)
+                
             connection_retries += 1
             if connection_retries < MAX_CONNECTION_RETRIES:
                 await asyncio.sleep(BACKOFF_FACTOR ** connection_retries)
