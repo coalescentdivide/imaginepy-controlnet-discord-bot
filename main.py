@@ -75,6 +75,7 @@ def parse_arguments(command_args: str):
     return parsed_args
 
 
+
 async def queue():
     global queue_counter
     while True:
@@ -160,7 +161,8 @@ async def queue_remix(ctx, command_args: str):
                     try:
                         print(f"{Fore.WHITE}{Back.MAGENTA}No prompt found. Interrogating Image...{s.RESET_ALL}")
                         generated_prompt = await asyncio.wait_for(imagine.interrogator(content=image), timeout=10)
-                        args['prompt'] = generated_prompt
+                        first_block = generated_prompt.split(',', 1)[0]
+                        args['prompt'] = first_block
                     except asyncio.TimeoutError:
                         args['prompt'] = "amazing"
                 remixed_image = await asyncio.wait_for(imagine.controlnet(content=image, prompt=args['prompt'], model=args['model'], mode=args['control'], negative=args['negative'], cfg=args['scale'], style=args['style'], strength=args['strength'], seed=args['seed']), timeout=15)
