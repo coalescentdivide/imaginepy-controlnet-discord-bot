@@ -11,7 +11,7 @@ from discord import Activity, ActivityType, Embed, File
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from imaginepy import AsyncImagine, Mode, Style, utils
+from imaginepy import AsyncImagine, Mode, Model, Style, utils
 
 load_dotenv()
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
@@ -24,6 +24,7 @@ def parse_arguments(command_args: str):
     args = command_args.split()
     parsed_args = {
         'prompt': '',
+        'model': Model.V3,
         'negative': None,
         'strength': 0,
         'scale': 7.5,
@@ -46,6 +47,8 @@ def parse_arguments(command_args: str):
                     parsed_args[current_key] = utils.get_strength(int(arg))
                 except ValueError:
                     raise ValueError(f"Invalid strength. Must be an integer between 0-100")
+            elif current_key == 'model':
+                parsed_args[current_key] = Model[arg.upper()]
             elif current_key == 'control':
                 parsed_args[current_key] = Mode[arg.upper()]
             elif current_key == 'style':
@@ -72,8 +75,6 @@ def parse_arguments(command_args: str):
     return parsed_args
 
 
-
-
 async def queue():
     global queue_counter
     while True:
@@ -95,8 +96,9 @@ async def on_ready():
 
 @bot.command()
 async def styles(ctx):
+    models = "\n".join(f"{model.name}" for model in Model)
     styles = "\n".join(f"{style.name}" for style in Style)
-    await ctx.send(f"Available styles:\n```\n{styles}\n```")
+    await ctx.send(f"Available models:\n```\n{models}\n```\n\nAvailable styles:\n```\n{styles}\n```")
 
 @bot.command()
 async def remix(ctx, *, command_args: str = ""):
@@ -107,15 +109,17 @@ async def remix(ctx, *, command_args: str = ""):
     elif ctx.message.reference and ctx.message.reference.resolved.attachments:
         image = ctx.message.reference.resolved.attachments[0] 
     if not image:
+        example_model = random.choice(list(Model)).name.lower()
         example_control = random.choice(list(Mode)).name.lower()
         example_style = random.choice(list(Style)).name.lower()
         embed = Embed(title="Use with an image attachment or reply to an image", description="!remix [optional prompt] [optional arguments]")        
-        embed.add_field(name="🖌️ Use a style or choose random", value="`--style random`\n*to see all available styles use the `!styles` command as a seperate message*\n", inline=False) 
-        embed.add_field(name="⚙️ Choose the control model:\n", value="`--control depth`\n`--control canny`\n`--control line_art`\n`--control scribble`\n`--control pose`\n", inline=False)
-        embed.add_field(name="❌ Choose a negative prompt (optional)", value="`--negative ugly`\n", inline=False)
+        embed.add_field(name="🖌️ Use a style or choose a random one (optional):", value="`--style random`\n*to see all available styles use the `!styles` command as a seperate message*\n", inline=False)
+        embed.add_field(name="💾 Change model (optional):", value="`--style random`\n*to see all available styles use the `!styles` command as a seperate message*\n", inline=False)
+        embed.add_field(name="⚙️ Set the control model:\n", value="`--control depth`\n\n`--control canny`\n\n`--control line_art`\n\n`--control scribble`\n\n`--control pose`", inline=False)
+        embed.add_field(name="❌ Choose a negative prompt (optional):", value="`--negative ugly`\n", inline=False)
         embed.add_field(name="⚖️ Change the guidance scale. Higher values increase the strength of your prompt. (Range: 0.0-10.0)", value="`--scale 8`\n", inline=False)
         embed.add_field(name="💪 Change the strength of the image to be remixed. Higher values change the image less. (Range: 0-100)", value="`--strength 50`\n", inline=False)
-        embed.add_field(name="Example", value=f"`!remix cat --control {example_control} --negative dog --style {example_style} --scale 8 --seed 12345`\n", inline=False)
+        embed.add_field(name="Example", value=f"`!remix cat --control {example_control} --model {example_model} --negative dog --style {example_style} --strength 10 --scale 8 --seed 12345`\n", inline=False)
         embed.add_field(name="", value=f"🔗[Github](https://github.com/coalescentdivide/imaginepy-controlnet-discord-bot/tree/main)", inline=False)
         embed.set_footer(text="Made by Trypsky")
         await ctx.send(embed=embed)
@@ -159,8 +163,8 @@ async def queue_remix(ctx, command_args: str):
                         args['prompt'] = generated_prompt
                     except asyncio.TimeoutError:
                         args['prompt'] = "amazing"
-                remixed_image = await asyncio.wait_for(imagine.controlnet(content=image, prompt=args['prompt'], mode=args['control'], negative=args['negative'], cfg=args['scale'], style=args['style'], strength=args['strength'], seed=args['seed']), timeout=15)
-                info = f"🧠{ctx.author.mention}⚙️`{args['control'].name.lower()}`⚖️`{args['scale']}`💪`{args['strength']}`🎨`{args['style'].name.lower()}`🌱`{args['seed']}`"
+                remixed_image = await asyncio.wait_for(imagine.controlnet(content=image, prompt=args['prompt'], model=args['model'], mode=args['control'], negative=args['negative'], cfg=args['scale'], style=args['style'], strength=args['strength'], seed=args['seed']), timeout=15)
+                info = f"🧠{ctx.author.mention}⚙️`{args['control'].name.lower()}`💾`{args['model'].name.lower()}`⚖️`{args['scale']}`💪`{args['strength']}`🎨`{args['style'].name.lower()}`🌱`{args['seed']}`"
                 combined_prompt = f"{args['prompt']} {args['style'].value[3]}" if args['style'].value[3] is not None else args['prompt']                
                 default_negative = 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry'
                 if args['negative'] != default_negative:
@@ -168,12 +172,13 @@ async def queue_remix(ctx, command_args: str):
                 else:
                     prompt = f"\n{combined_prompt}"
                 print(f"{Fore.GREEN}Successfully processed image with the following settings:{s.RESET_ALL}\n"
-                      f"{Fore.YELLOW}Prompt:{s.RESET_ALL} {Back.WHITE}{Fore.BLACK}{combined_prompt}{s.RESET_ALL}\n"
-                      f"{Fore.YELLOW}Negative:{s.RESET_ALL} {Back.WHITE}{Fore.RED}{args['negative']}{s.RESET_ALL}\n"
-                      f"{Fore.YELLOW}Seed:{s.RESET_ALL} {args['seed']}\n"
-                      f"{Fore.YELLOW}Strength:{s.RESET_ALL} {args['strength']}\n"
-                      f"{Fore.YELLOW}Control:{s.RESET_ALL} {args['control'].name}\n"
-                      f"{Fore.YELLOW}Style:{s.RESET_ALL} {args['style'].name}")             
+                      f"{Fore.YELLOW}Prompt: {s.RESET_ALL}{Back.WHITE}{Fore.BLACK}{combined_prompt}{s.RESET_ALL}\n"
+                      f"{Fore.YELLOW}Negative: {s.RESET_ALL}{Fore.RED}{args['negative']}{s.RESET_ALL}\n"
+                      f"{Fore.YELLOW}Model: {s.RESET_ALL}{args['model'].name}{s.RESET_ALL}\n"
+                      f"{Fore.YELLOW}Seed: {s.RESET_ALL}{args['seed']}\n"
+                      f"{Fore.YELLOW}Strength: {s.RESET_ALL}{args['strength']}\n"
+                      f"{Fore.YELLOW}Control: {s.RESET_ALL}{args['control'].name}\n"
+                      f"{Fore.YELLOW}Style: {s.RESET_ALL}{args['style'].name}")             
                 file = File(fp=io.BytesIO(remixed_image), filename="remixed_image.png")
                 embed = Embed()
                 embed.set_footer(text=prompt)
