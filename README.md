@@ -14,7 +14,7 @@ Python (3.9 or 3.10 is recommended)
 ##### 3. Click "Reset Token" to get your Discord Bot Token for the .env file.
 ##### 4. Disable "Public Bot".
 ##### 5. Under "Privileged Gateway Intents" enable "Presence Intent", "Server Member Intent" and "Message Content Intent".
-##### 6. Go to the OAuth2 tab and select URL generator. Under Scopes check bot, then in the permissions check Send Messages and Embed Links. Use the generated URL to invite the bot to your server.
+##### 6. Go to the OAuth2 tab and select URL generator. Under Scopes check bot, then in the permissions check Send Messages, Embed Links and Read Message History. (You can also choose these permissions for specific channels only later.) Use the generated URL to invite the bot to your server.
 
 ### Installation
 
