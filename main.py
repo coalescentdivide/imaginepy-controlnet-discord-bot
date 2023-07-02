@@ -2,6 +2,7 @@ import asyncio
 import io
 import os
 import random
+import re
 
 import discord
 import httpx
@@ -9,9 +10,10 @@ from colorama import Back, Fore
 from colorama import Style as s
 from discord import Activity, ActivityType, Embed, File
 from discord.ext import commands
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 from imaginepy import AsyncImagine, Mode, Model, Style, utils
+from buttons import RemixMenu
 
 load_dotenv()
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
@@ -30,7 +32,7 @@ def parse_arguments(command_args: str):
         'scale': 7.5,
         'control': Mode.CANNY,
         'style': Style.NO_STYLE,
-        'seed': str(random.randint(1, 9999999999))
+        'seed': random_seed()
     }
     current_key = 'prompt'
     for arg in args:
@@ -48,18 +50,23 @@ def parse_arguments(command_args: str):
                 except ValueError:
                     raise ValueError(f"Invalid strength. Must be an integer between 0-100")
             elif current_key == 'model':
-                parsed_args[current_key] = Model[arg.upper()]
-            elif current_key == 'control':
-                parsed_args[current_key] = Mode[arg.upper()]
-            elif current_key == 'style':
-                style_str = arg.upper()
-                if style_str == "RANDOM":
-                    random_style = random.choice(list(Style))
-                    while random_style == Style.RANDOM:
-                        random_style = random.choice(list(Style))
-                    parsed_args[current_key] = random_style
+                model_str = arg.lower()
+                if model_str == "random":
+                    parsed_args[current_key] = random_model()
                 else:
-                    parsed_args[current_key] = Style[style_str]
+                    parsed_args[current_key] = Model[model_str.upper()]
+            elif current_key == 'control':
+                control_str = arg.lower()
+                if control_str == "random":
+                    parsed_args[current_key] = random_control()
+                else:
+                    parsed_args[current_key] = Mode[control_str.upper()]
+            elif current_key == 'style':
+                style_str = arg.lower()
+                if style_str == "random":
+                    parsed_args[current_key] = random_style()
+                else:
+                    parsed_args[current_key] = Style[style_str.upper()]
             elif current_key == 'seed':
                 try:
                     parsed_args[current_key] = int(arg)
@@ -71,9 +78,47 @@ def parse_arguments(command_args: str):
                 else:
                     parsed_args[current_key] += ' ' + arg
     if parsed_args['negative'] is None:
-        parsed_args['negative'] = 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry'
+        parsed_args['negative'] = "glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry"
     return parsed_args
 
+
+def get_args(message_content: str, embed_footer_text: str) -> dict:
+    args = {}
+    mappings = {
+        'control': r'⚙️`([a-zA-Z0-9_]+)`',
+        'model': r'💾`([a-zA-Z0-9_]+)`',
+        'scale': r'⚖️`([\d.]+)`',
+        'strength': r'💪`([\d.]+)`',
+        'style': r'🎨`([a-zA-Z0-9_]+)`',
+        'seed': r'🌱`(\d+)`',
+        'negative': r'Negative Prompt:\n([^\n]+)'
+    }
+    for key, regex in mappings.items():
+        match = re.search(regex, message_content)
+        if match:
+            args[key] = match.group(1)
+    args['prompt'] = ""
+    return args
+
+
+def random_model():
+    return random.choice(list(Model))
+def random_control():
+    return random.choice(list(Mode))
+def random_style():
+    return random.choice(list(Style))
+def random_seed():
+    return str(random.randint(1, 9999999999))
+
+def get_style_name(style_str):
+    try:
+        style_name = style_str.upper()
+        if style_name in Style.__members__:
+            return style_name.lower()
+        else:
+            return 'no_style'
+    except KeyError:
+        return 'no_style'
 
 
 async def queue():
@@ -89,17 +134,96 @@ async def queue():
             queue_counter -= 1
 
 
+async def remix_from_interaction(interaction: discord.Interaction, command_args: str, interaction_user: discord.User):
+    ctx = await bot.get_context(interaction.message)
+    ctx.interaction_user = interaction_user
+    global queue_counter
+    await task_queue.put((queue_remix, ctx, command_args))
+    queue_counter += 1
+    print(f"{Fore.BLUE}{s.BRIGHT}Queue size: {queue_counter}{s.RESET_ALL}")
+
+
 @bot.event
 async def on_ready():
     print(f"{Fore.CYAN}{bot.user} has connected to Discord!{s.RESET_ALL}")
     await bot.change_presence(activity=Activity(type=ActivityType.watching, name="for !remix + image"))
     bot.loop.create_task(queue())
 
+
 @bot.command()
 async def styles(ctx):
     models = "\n".join(f"{model.name}" for model in Model)
     styles = "\n".join(f"{style.name}" for style in Style)
     await ctx.send(f"Available models:\n```\n{models}\n```\n\nAvailable styles:\n```\n{styles}\n```")
+
+
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    if interaction.type == discord.InteractionType.component:
+        if interaction.data["custom_id"] == "remix_button":
+            await interaction.response.defer(ephemeral=False)
+            await interaction.followup.send(content="Remixing...", ephemeral=True)
+            channel = interaction.channel
+            bot_message = await channel.fetch_message(interaction.message.id)            
+            message_content = bot_message.content
+            if bot_message.embeds:
+                embed_footer_text = bot_message.embeds[0].footer.text
+            else:
+                print("Error: Embed not found in the message.")
+                return
+            args = get_args(message_content, embed_footer_text)            
+            args['seed'] = random_seed()
+            image = None
+            if interaction.message.attachments:
+                image = interaction.message.attachments[0]
+            elif interaction.message.reference and interaction.message.reference.resolved.attachments:
+                image = interaction.message.reference.resolved.attachments[0]
+            command_args = f"{args['prompt']} --model {args.get('model', 'V3')} --control {args.get('control', 'canny')} --negative {args.get('negative', 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry')} --scale {args.get('scale', '7.5')} --style {args.get('style', 'no_style')} --strength {args.get('strength', '0')} --seed {args.get('seed', '42')}"
+            await remix_from_interaction(interaction, command_args, interaction.user)
+
+        elif interaction.data["custom_id"] == "random_style_button":
+            await interaction.response.defer(ephemeral=False)
+            await interaction.followup.send(content="Remixing with random style", ephemeral=True)
+            channel = interaction.channel
+            bot_message = await channel.fetch_message(interaction.message.id)            
+            message_content = bot_message.content
+            if bot_message.embeds:
+                embed_footer_text = bot_message.embeds[0].footer.text
+            else:
+                print("Error: Embed not found in the message.")
+                return
+            args = get_args(message_content, embed_footer_text)        
+            args['style'] = random_style().name
+            image = None
+            if interaction.message.attachments:
+                image = interaction.message.attachments[0]
+            elif interaction.message.reference and interaction.message.reference.resolved.attachments:
+                image = interaction.message.reference.resolved.attachments[0]
+            command_args = f"{args['prompt']} --model {args.get('model', 'V3')} --control {args.get('control', 'canny')} --negative {args.get('negative', 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry')} --scale {args.get('scale', '7.5')} --style {args.get('style', 'no_style')} --strength {args.get('strength', '0')} --seed {args.get('seed', '42')}"
+            await remix_from_interaction(interaction, command_args, interaction.user)
+
+        elif interaction.data["custom_id"] == "control_model_select":
+            control_model = interaction.data["values"][0]
+            await interaction.response.defer(ephemeral=False)
+            await interaction.followup.send(content=f"Remixing with {control_model} control model", ephemeral=True)
+            channel = interaction.channel
+            bot_message = await channel.fetch_message(interaction.message.id)
+            message_content = bot_message.content
+            if bot_message.embeds:
+                embed_footer_text = bot_message.embeds[0].footer.text
+            else:
+                print("Error: Embed not found in the message.")
+                return
+            args = get_args(message_content, embed_footer_text)
+            args['control'] = Mode[control_model].name
+            image = None
+            if interaction.message.attachments:
+                image = interaction.message.attachments[0]
+            elif interaction.message.reference and interaction.message.reference.resolved.attachments:
+                image = interaction.message.reference.resolved.attachments[0]
+            command_args = f"{args['prompt']} --model {args.get('model', 'V3')} --control {args.get('control', 'canny')} --negative {args.get('negative', 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry')} --scale {args.get('scale', '7.5')} --style {args.get('style', 'no_style')} --strength {args.get('strength', '0')} --seed {args.get('seed', '42')}"
+            await remix_from_interaction(interaction, command_args, interaction.user)
+
 
 @bot.command()
 async def remix(ctx, *, command_args: str = ""):
@@ -129,8 +253,10 @@ async def remix(ctx, *, command_args: str = ""):
         queue_counter += 1
         print(f"{Fore.BLUE}{s.BRIGHT}Queue size: {queue_counter}{s.RESET_ALL}")
 
+
 async def queue_remix(ctx, command_args: str):
-    print(f"User {Fore.RED}{s.BRIGHT}{ctx.author.name}{s.RESET_ALL} remixing an image")
+    author = ctx.interaction_user if hasattr(ctx, 'interaction_user') else ctx.author
+    print(f"{Fore.RED}{s.BRIGHT}{author.name}{s.RESET_ALL} is remixing an image")
     image = None
     if ctx.message.reference and ctx.message.reference.resolved:
         replied_message = ctx.message.reference.resolved
@@ -161,12 +287,12 @@ async def queue_remix(ctx, command_args: str):
                     try:
                         print(f"{Fore.WHITE}{Back.MAGENTA}No prompt found. Interrogating Image...{s.RESET_ALL}")
                         generated_prompt = await asyncio.wait_for(imagine.interrogator(content=image), timeout=10)
-                        first_block = generated_prompt.split(',', 1)[0]
-                        args['prompt'] = first_block
+                        concise_prompt = generated_prompt.split(',', 1)[0]
+                        args['prompt'] = concise_prompt
                     except asyncio.TimeoutError:
                         args['prompt'] = "amazing"
                 remixed_image = await asyncio.wait_for(imagine.controlnet(content=image, prompt=args['prompt'], model=args['model'], mode=args['control'], negative=args['negative'], cfg=args['scale'], style=args['style'], strength=args['strength'], seed=args['seed']), timeout=15)
-                info = f"🧠{ctx.author.mention}⚙️`{args['control'].name.lower()}`💾`{args['model'].name.lower()}`⚖️`{args['scale']}`💪`{args['strength']}`🎨`{args['style'].name.lower()}`🌱`{args['seed']}`"
+                info = f"🧠{author.mention}⚙️`{args['control'].name.lower()}`💾`{args['model'].name.lower()}`⚖️`{args['scale']}`💪`{args['strength']}`🎨`{args['style'].name.lower()}`🌱`{args['seed']}`"
                 combined_prompt = f"{args['prompt']} {args['style'].value[3]}" if args['style'].value[3] is not None else args['prompt']                
                 default_negative = 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry'
                 if args['negative'] != default_negative:
@@ -184,7 +310,8 @@ async def queue_remix(ctx, command_args: str):
                 file = File(fp=io.BytesIO(remixed_image), filename="remixed_image.png")
                 embed = Embed()
                 embed.set_footer(text=prompt)
-                await ctx.send(content=f"{info}\n\n", file=file, embed=embed)
+                #await ctx.send(content=f"{info}\n\n", file=file, embed=embed)
+                await ctx.send(content=f"{info}\n\n", file=file, embed=embed, view=RemixMenu(ctx, args))
                 success = True
                 break
             except httpx.HTTPStatusError as e:
