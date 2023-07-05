@@ -204,27 +204,27 @@ async def on_interaction(interaction: discord.Interaction):
         elif interaction.data["custom_id"] == "random_style_button":
             await interaction.followup.send(content="Remixing with random style", ephemeral=True)     
             args['style'] = random_style().name
-            command_args = f"{args['prompt']} --model {args.get('model', 'V3')} --control {args.get('control', 'canny')} --negative {args.get('negative', 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry')} --scale {args.get('scale', '7.5')} --style {args.get('style', 'no_style')} --strength {args.get('strength', '0')} --seed {args.get('seed', '42')}"
+            command_args = f"{args['prompt']} --model {args.get('model', 'V3')} --control {args.get('control', 'canny')} --negative {args.get('negative', default_negative)} --scale {args.get('scale', '7.5')} --style {args.get('style', 'no_style')} --strength {args.get('strength', '0')} --seed {args.get('seed', '42')}"
             await remix_from_interaction(interaction, command_args, interaction.user, message_id)
 
         elif interaction.data["custom_id"] == "random_model_button":
             await interaction.followup.send(content="Remixing with random model", ephemeral=True)      
             args['model'] = random_model().name
-            command_args = f"{args['prompt']} --model {args.get('model', 'V3')} --control {args.get('control', 'canny')} --negative {args.get('negative', 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry')} --scale {args.get('scale', '7.5')} --style {args.get('style', 'no_style')} --strength {args.get('strength', '0')} --seed {args.get('seed', '42')}"
+            command_args = f"{args['prompt']} --model {args.get('model', 'V3')} --control {args.get('control', 'canny')} --negative {args.get('negative', default_negative)} --scale {args.get('scale', '7.5')} --style {args.get('style', 'no_style')} --strength {args.get('strength', '0')} --seed {args.get('seed', '42')}"
             await remix_from_interaction(interaction, command_args, interaction.user, message_id)
 
         elif interaction.data["custom_id"] == "control_model_select":
             control_model = interaction.data["values"][0]
             await interaction.followup.send(content=f"Remixing with {control_model} control model", ephemeral=True)
             args['control'] = Mode[control_model].name
-            command_args = f"{args['prompt']} --model {args.get('model', 'V3')} --control {args.get('control', 'canny')} --negative {args.get('negative', 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry')} --scale {args.get('scale', '7.5')} --style {args.get('style', 'no_style')} --strength {args.get('strength', '0')} --seed {args.get('seed', '42')}"
+            command_args = f"{args['prompt']} --model {args.get('model', 'V3')} --control {args.get('control', 'canny')} --negative {args.get('negative', default_negative)} --scale {args.get('scale', '7.5')} --style {args.get('style', 'no_style')} --strength {args.get('strength', '0')} --seed {args.get('seed', '42')}"
             await remix_from_interaction(interaction, command_args, interaction.user, message_id)
 
         elif interaction.data["custom_id"] == "model_select":
             model = interaction.data["values"][0]
             await interaction.followup.send(content=f"Remixing with {model}", ephemeral=True)
             args['model'] = Model[model].name
-            command_args = f"{args['prompt']} --model {args.get('model', 'V3')} --control {args.get('control', 'canny')} --negative {args.get('negative', 'glitch,deformed,lowres,bad anatomy,bad hands,text,error,missing fingers,cropped,jpeg artifacts,signature,watermark,username,blurry')} --scale {args.get('scale', '7.5')} --style {args.get('style', 'no_style')} --strength {args.get('strength', '0')} --seed {args.get('seed', '42')}"
+            command_args = f"{args['prompt']} --model {args.get('model', 'V3')} --control {args.get('control', 'canny')} --negative {args.get('negative', default_negative)} --scale {args.get('scale', '7.5')} --style {args.get('style', 'no_style')} --strength {args.get('strength', '0')} --seed {args.get('seed', '42')}"
             await remix_from_interaction(interaction, command_args, interaction.user, message_id)
 
 
