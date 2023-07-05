@@ -4,21 +4,14 @@ from discord.ui import Button, Select, View
 class RemixButton(Button):
     def __init__(self, ctx, command_args):
         emoji = "🌱"
-        super().__init__(style=discord.ButtonStyle.secondary, label="Random Seed", emoji=emoji, custom_id="remix_button")
+        super().__init__(style=discord.ButtonStyle.secondary, label="ReMix", emoji=emoji, custom_id="remix_button")
         self.ctx = ctx
         self.command_args = command_args
 
 class RandomStyleButton(Button):
     def __init__(self, ctx, command_args):
         emoji = "🎨"
-        super().__init__(style=discord.ButtonStyle.secondary, label="Random Style", emoji=emoji, custom_id="random_style_button")
-        self.ctx = ctx
-        self.command_args = command_args
-
-class RandomModelButton(Button):
-    def __init__(self, ctx, command_args):
-        emoji = "💾"
-        super().__init__(style=discord.ButtonStyle.secondary, label="Random Model", emoji=emoji, custom_id="random_model_button")
+        super().__init__(style=discord.ButtonStyle.secondary, label="ReStyle", emoji=emoji, custom_id="random_style_button")
         self.ctx = ctx
         self.command_args = command_args
 
@@ -35,11 +28,33 @@ class ControlModelSelect(Select):
         self.ctx = ctx
         self.command_args = command_args
 
+class ModelSelect(Select):
+    def __init__(self, ctx, command_args):
+        options = [
+            discord.SelectOption(label="v4_1", value="V4_1"),
+            discord.SelectOption(label="v4_beta", value="V4_BETA"),
+            discord.SelectOption(label="creative", value="CREATIVE"),
+            discord.SelectOption(label="v3", value="V3"),
+            discord.SelectOption(label="v1", value="V1"),
+            discord.SelectOption(label="portrait", value="PORTRAIT"),
+            discord.SelectOption(label="realistic", value="REALISTIC"),
+            discord.SelectOption(label="anime", value="ANIME"),
+            discord.SelectOption(label="deliberate", value="DELIBERATE"),
+            discord.SelectOption(label="majic_mix", value="MAJIC_MIX"),
+            discord.SelectOption(label="disney", value="DISNEY"),
+            discord.SelectOption(label="orange_mix", value="ORANGE_MIX"),
+            discord.SelectOption(label="lyriel", value="LYRIEL"),
+            discord.SelectOption(label="rpg", value="RPG")
+        ]
+        super().__init__(custom_id="model_select", options=options, placeholder="Choose a model to use for the remix")
+        self.ctx = ctx
+        self.command_args = command_args
 
 class RemixMenu(View):
     def __init__(self, ctx, command_args):
         super().__init__()
+        self.add_item(ControlModelSelect(ctx, command_args))
+        self.add_item(ModelSelect(ctx, command_args))
         self.add_item(RemixButton(ctx, command_args))
         self.add_item(RandomStyleButton(ctx, command_args))
-        #self.add_item(RandomModelButton(ctx, command_args)) Uncomment to enable
-        self.add_item(ControlModelSelect(ctx, command_args))
+
