@@ -50,11 +50,29 @@ class ModelSelect(Select):
         self.ctx = ctx
         self.command_args = command_args
 
+class StrengthSelect(Select):
+    def __init__(self, ctx, command_args):
+        options = [
+            discord.SelectOption(
+                label=str(i),
+                value=str(i),
+                description=f"Max change to original" if i == 0 else
+                f"No change to original" if i == 100 else
+                f""
+            )
+            for i in range(0, 101, 10)
+        ]
+        super().__init__(custom_id="strength_select", options=options, placeholder="Set original image strength (0-100)")
+        self.ctx = ctx
+        self.command_args = command_args
+
+
 class RemixMenu(View):
     def __init__(self, ctx, command_args):
         super().__init__()
         self.add_item(ControlModelSelect(ctx, command_args))
         self.add_item(ModelSelect(ctx, command_args))
+        self.add_item(StrengthSelect(ctx, command_args))
         self.add_item(RemixButton(ctx, command_args))
         self.add_item(RandomStyleButton(ctx, command_args))
 
